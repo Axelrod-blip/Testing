@@ -1,11 +1,40 @@
-"""Сервис для работы с LLM моделями через API OpenAI"""
+"""Сервис для работы с LLM моделями через API OpenAI и Google Gemini"""
 import os
 import logging
 import httpx
 import json
+import google.generativeai as genai
 from typing import Dict, Any, Optional
 
 from app.prompts import create_workout_prompt, create_meal_plan_prompt
+
+# Инициализация Gemini
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+if GOOGLE_API_KEY:
+    genai.configure(api_key=GOOGLE_API_KEY)
+else:
+    logging.warning("GOOGLE_API_KEY не найден. Функции Gemini будут недоступны.")
+
+async def generate_with_gemini(prompt: str) -> str:
+    """
+    Генерация текста с помощью Google Gemini.
+    
+    Args:
+        prompt: Текст промпта
+        
+    Returns:
+        str: Сгенерированный текст
+    """
+    if not GOOGLE_API_KEY:
+        return "API ключ Gemini не настроен. Обратитесь к администратору."
+    
+    try:
+        model = genai.GenerativeModel('gemini-2.0-flash-lite')
+        response = await model.generate_content_async(prompt)
+        return response.text.strip()
+    except Exception as e:
+        logging.error(f"Error generating text with Gemini: {e}")
+        return f"Произошла ошибка при генерации: {str(e)}"
 
 class LLMService:
     """Класс для работы с LLM моделями через API OpenAI"""

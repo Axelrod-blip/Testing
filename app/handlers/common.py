@@ -4,32 +4,18 @@ from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.state import default_state
+from sqlalchemy import select
 
 # Import necessary functions/data (e.g., for fetching user profile)
 # from app.db import get_user_profile_dict # Renamed hypothetical function
 from app.handlers.onboarding import cmd_onboard, get_user_profile_dict # To reuse onboarding logic for /update
 from app.ui_elements import format_message, format_profile
+from app.models import User
+from app.db import async_session_factory
+from app.keyboards import goal_keyboard, next_step_kb
+from app.states import OnboardingStates
 
 common_router = Router() # Renamed router instance
-
-# --- Константы ---
-TOTAL_STEPS = 18
-PROGRESS_BAR_LENGTH = 20
-PROGRESS_EMOJIS = ["⚡️", "💪", "🎯", "✨", "🌟", "⭐️", "💫", "🌠"]
-PROGRESS_MESSAGES = [
-    "Отлично! Продолжаем...",
-    "Супер! Идем дальше...",
-    "Потрясающе! Следующий шаг...",
-    "Великолепно! Еще чуть-чуть..."
-]
-
-FUNNY_MESSAGES = {
-    "start": [
-        "👋 *Привет!* Я твой личный AI-тренер, и я уже готов помочь тебе стать лучшей версией себя! 💪",
-        "🎯 *Приветствую!* Я твой AI-тренер, и я знаю, что ты можешь достичь любых целей! ✨",
-        "🚀 *Привет, спортсмен!* Я твой AI-тренер, и вместе мы сделаем тебя неотразимым! 💫"
-    ],
-}
 
 # --- Форматирование и прогресс ---
 def format_user_data(data: dict) -> str:
@@ -106,22 +92,35 @@ def format_user_profile(data: dict) -> str:
 @common_router.message(Command("start")) # Use renamed router
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear() # Clear any previous state
-    # TODO: Add logic to check if user exists/is onboarded in DB
     
-    start_message = format_message(
-        "Добро пожаловать",
-        "Я ваш фитнес-помощник! Вот доступные команды:\n\n"
-        "• /onboard - Заполнить/обновить анкету\n"
-        "• /profile - Просмотр вашего профиля\n"
-        "• /cancel - Отмена текущего действия",
-        "info"
-    )
+    # Проверяем, есть ли у пользователя профиль
+    user = await get_user_from_db(message.from_user.id)
     
-    await message.answer(
-        start_message,
-        reply_markup=ReplyKeyboardRemove(),
-        parse_mode="HTML"
-    )
+    if user:
+        # Если профиль есть, показываем приветствие и кнопки действий
+        welcome_msg = format_message(
+            "С возвращением!",
+            "Что бы вы хотели сделать?",
+            "info"
+        )
+        await message.answer(
+            welcome_msg,
+            reply_markup=next_step_kb,
+            parse_mode="HTML"
+        )
+    else:
+        # Если профиля нет, начинаем онбординг
+        welcome_msg = format_message(
+            "Давайте познакомимся", 
+            "Несколько вопросов для начала. Какова ваша главная цель?",
+            "info"
+        )
+        await message.answer(
+            welcome_msg,
+            reply_markup=goal_keyboard(),
+            parse_mode="HTML"
+        )
+        await state.set_state(OnboardingStates.Goal)
 
 @common_router.message(Command("cancel"), ~StateFilter(default_state)) # Use renamed router
 async def cmd_cancel_state(message: Message, state: FSMContext):
@@ -161,27 +160,18 @@ async def cmd_cancel_no_state(message: Message):
 async def cmd_profile(message: Message):
     """Displays user profile information."""
     user_id = message.from_user.id
+    user = await get_user_from_db(user_id)
     
-    try:
-        user_data = await get_user_profile_dict(user_id)
-        if user_data:
-            profile_html = format_profile(user_data)
-            await message.answer(profile_html, parse_mode="HTML")
-        else:
-            not_found_msg = format_message(
-                "Профиль не найден",
-                "Пожалуйста, заполните анкету с помощью команды /onboard.",
-                "warning"
-            )
-            await message.answer(not_found_msg, parse_mode="HTML")
-    except Exception as e:
-        logging.error(f"Error fetching profile for user {user_id}: {e}")
-        error_msg = format_message(
-            "Ошибка загрузки",
-            "Не удалось загрузить ваш профиль. Попробуйте позже.",
-            "error"
+    if user:
+        profile_html = format_profile(user.to_dict())
+        await message.answer(profile_html, parse_mode="HTML")
+    else:
+        not_found_msg = format_message(
+            "Профиль не найден",
+            "Пожалуйста, заполните анкету с помощью команды /onboard.",
+            "warning"
         )
-        await message.answer(error_msg, parse_mode="HTML")
+        await message.answer(not_found_msg, parse_mode="HTML")
 
 @common_router.message(Command("update")) # Use renamed router
 async def cmd_update(message: Message, state: FSMContext):
@@ -226,3 +216,34 @@ async def handle_unknown_callback(callback: CallbackQuery):
     except Exception as e:
         logging.warning(f"Could not delete message for unknown callback: {e}") # Log deletion error
         pass # Ignore if deletion fails (e.g., message too old)
+
+async def get_user_from_db(telegram_id: int) -> User | None:
+    """Получает пользователя из базы данных по telegram_id."""
+    try:
+        async with async_session_factory() as session:
+            result = await session.execute(
+                select(User).where(User.telegram_id == telegram_id)
+            )
+            return result.scalar_one_or_none()
+    except Exception as e:
+        logging.error(f"Error getting user {telegram_id}: {e}")
+        return None
+
+async def safe_message_answer(event: Message | CallbackQuery, text: str, **kwargs) -> Message:
+    """Безопасная отправка сообщения с обработкой ошибок."""
+    try:
+        if isinstance(event, CallbackQuery):
+            return await event.message.answer(text, **kwargs)
+        return await event.answer(text, **kwargs)
+    except Exception as e:
+        logging.error(f"Error sending message: {e}")
+        return None
+
+async def safe_message_edit(message: Message, text: str, **kwargs) -> bool:
+    """Безопасное редактирование сообщения с обработкой ошибок."""
+    try:
+        await message.edit_text(text, **kwargs)
+        return True
+    except Exception as e:
+        logging.error(f"Error editing message: {e}")
+        return False

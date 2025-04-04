@@ -34,6 +34,10 @@ class User(Base):
     excluded_foods = Column(Text, nullable=True)
     favorite_foods = Column(Text, nullable=True)
     
+    # Сгенерированные планы
+    workout_plan = Column(Text, nullable=True)  # План тренировок
+    meal_plan = Column(Text, nullable=True)  # План питания
+    
     def __repr__(self):
         return f"<User(telegram_id={self.telegram_id})>"
 

@@ -87,6 +87,15 @@ activity_level_keyboard = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="⚡ Высокая", callback_data="activity_high")],
 ])
 
+# --- Клавиатуры для профиля --- #
+
+profile_kb = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Изменить профиль", callback_data="edit_profile")],
+        [InlineKeyboardButton(text="🔄 В начало", callback_data="back_to_start")],
+    ]
+)
+
 # --- Клавиатуры после завершения онбординга / для команд --- #
 
 next_step_kb = InlineKeyboardMarkup(
@@ -94,7 +103,6 @@ next_step_kb = InlineKeyboardMarkup(
         [InlineKeyboardButton(text="💪 План тренировок", callback_data="create_workout")],
         [InlineKeyboardButton(text="🥗 План питания", callback_data="create_meal_plan")],
         [InlineKeyboardButton(text="✏️ Изменить ответы", callback_data="edit_profile")],
-        # Убрали кнопку Отмена отсюда, т.к. обычно она нужна в контексте предложения
     ]
 )
 
